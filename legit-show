@@ -1,0 +1,116 @@
+#!/bin/dash
+#print the contents of the specified file as of the specified commit
+#If the commit is omitted the contents of the file in the index should be printed.
+
+
+#usage: legit-show <commit>:<filename> x
+#legit-show: error: invalid object a123 if theres no : x
+#legit-show: error: invalid filename ':' things after :
+#legit-show: error: 'a' not found in index
+#legit-show: error: 'a' not found in commit 0
+#legit-show: error: unknown commit 'a'
+#legit-show: error: no .legit directory containing legit repository exists x
+#legit-show: error: your repository does not have any commits yet x
+
+#even if files in index, wont do anything if no commits 
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-show: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+
+#no commits nlogs = 0
+nlogs=`cat ./.legit/log | wc -l`
+if test $nlogs -eq 0 #no commits have been made ever
+then
+	echo "legit-show: error: your repository does not have any commits yet" >&2
+	exit 1
+fi
+
+#usage for args
+if test "$#" -ne 1
+then
+	echo "usage: legit-show <commit>:<filename>" >&2
+	exit 1
+fi
+#invalid object if $1 doesn't have :
+colon=`echo "$1" |
+	   egrep ":"` #empty if doesnt contain :
+flagnum=`echo "$1" | 
+		 egrep  -v "^-([0-9]|;)+$"` #empty if -number
+noflag=`echo "$1" | 
+		egrep "^-"` #empty if isnt a flag
+if test -z "$colon"
+then
+	if test "$1" = "-"|| test -z "$flagnum" || test -z "$noflag" #if just -, -number or not a flag
+	then
+		echo "legit-show: error: invalid object $1" >&2
+		exit 1
+	fi
+fi
+
+#usage for - flag -: and weird characters infront of :
+flag=`echo "$1" | 
+	  egrep -v "^-"` #empty if -a or -$ etc
+character=`echo "$1" | 
+		   egrep -v "^(#|;|>|<):"` #empty if #: ;: >: <:
+if test -z "$flag" || test -z "$character"
+then
+	echo "usage: legit-show <commit>:<filename>" >&2
+	exit 1
+fi
+
+
+#if nothing infront of : commit =  index ,else commit = arg separate $1 by :
+commit=`echo "$1" | 
+		cut -d':' -f1` #field before :
+file=`echo "$1" | 
+	  cut -d':' -f2` #field after :
+
+if test ! -z "$commit" #if commit is not empty
+then #check commit > nlogs and is a number 
+	isnumber=`echo "$commit" | 
+			  egrep '^[0-9]+$'` #empty if is not a number 
+	if test -z "$isnumber" || test "$commit" -ge "$nlogs"
+	then
+		echo "legit-show: error: unknown commit '$commit'" >&2
+		exit 1
+	fi
+fi
+
+
+if test -z "$file" #no file given
+then
+	echo "legit-show: error: invalid filename '$file'" >&2
+	exit 1
+fi
+
+files_valid=`echo "$file" | 
+			 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'` #empty if filename is invalid
+if test -z "$files_valid" #if filename is invalid
+then
+	echo "legit-show: error: invalid filename '$file'" >&2
+	exit 1
+fi
+
+if test -z "$commit" #if commit is empty
+then #look through index, check file exists
+	if test ! -e "./.legit/.index/$file" #if file does not exist in index
+	then
+		echo "legit-show: error: '$file' not found in index" >&2
+		exit 1
+	fi
+	cat ./.legit/.index/$file
+	exit 0
+else #look through commit, check file exists
+	if test ! -e "./.legit/.repo/$commit/$file" #if file does not exist in repo/commit
+	then
+		echo "legit-show: error: '$file' not found in commit $commit" >&2
+		exit 1
+	fi
+	cat ./.legit/.repo/$commit/$file
+	exit 0
+fi
+

@@ -1,0 +1,81 @@
+#!/bin/dash
+#usage: legit-add <filenames> 
+#legit-add: error: can not open 'a.c', exits straight after
+#legit-add: error: invalid filename '$.txt'
+#legit-add: error: no .legit directory containing legit repository exists
+#legit-add: error: 'DIR' is not a regular file
+#adds the contents of one or more files to the "index"
+#Only ordinary files in the current directory can be added, and their names will always start with an alphanumeric character ([a-zA-Z0-9]) and will only contain alpha-numeric characters plus '.', '-' and '_' characters.
+#stored in sub-dr .index in .legit
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-add: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+if test "$#" -lt 1 #if did not supply a file
+then
+	echo "usage: legit-add <filenames>" >&2
+	exit 1
+fi 
+
+#loop through all files provided 
+for files in "$@"
+do 
+#if file starts with - give usage error
+	checkstart=`echo "$files"|
+				egrep -v '^-'` #empty if contains -
+	onlydash=`echo "$files" | 
+			  egrep -v '^-$'` #file is just -
+	flag=`echo "$files" | 
+		  egrep -v '^-[0-9]+$'` #file is -number
+	if test -z "$onlydash" || test -z "$flag" #if empty
+	then
+		echo "legit-add: error: invalid filename '$files'" >&2
+		exit 1
+	fi
+	if test -z "$checkstart" #if empty
+	then
+		echo "usage: legit-add <filenames>" >&2
+		exit 1
+	fi
+
+
+
+#if filename is invalid
+	files_valid=`echo "$files" | 
+				 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'` #empty if filename is invalid
+	if test -z "$files_valid" #if filename is invalid
+	then
+		echo "legit-add: error: invalid filename '$files'" >&2
+		exit 1
+	fi
+	if test ! -e "$files"  #if file does not exist
+	then
+		exists_index=`cat "./.legit/addlog" | 
+					  egrep "^$files$"` #not empty if it has been previously added to index 
+		if test ! -z "$exists_index" && test -e "./.legit/.index/$files"
+		then
+			rm "./.legit/.index/$files" #remove from index
+			continue
+		fi
+		echo "legit-add: error: can not open '$files'" >&2
+		exit 1
+	fi
+	if test ! -f "$files" #if file is not a reg file 
+	then
+		echo "legit-add: error: '$files' is not a regular file" >&2
+		exit 1
+	fi
+done
+
+for files in "$@" #otherwise, good to add
+do 
+	if test -e "$files"
+	then
+		cp "$files" "./.legit/.index"
+		echo "$files" >>"./.legit/addlog" #used to determine if file has ever been added regardless if file is still in working directory 
+	fi
+done
+exit 0

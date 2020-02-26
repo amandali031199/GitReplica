@@ -1,0 +1,176 @@
+#!/usr/local/bin/perl -w
+#legit-branch: error: no .legit directory containing legit repository exists
+#legit-branch: error: your repository does not have any commits yet
+use File::Path 'rmtree';
+use File::Compare;
+use File::Copy;
+use File::Basename;
+
+#if branches dir doesnt exist create it
+if (! -d "./.legit/branch/master"){
+	mkdir "./.legit/branch/master";
+	foreach $copyfile (glob "*"){
+		next if (-d $copyfile);
+		copy ("$copyfile",".legit/branch/master");
+	}
+}
+#if .legit doesnt exist
+if (! -d ".legit"){
+	say STDERR "legit-branch: error: no .legit directory containing legit repository exists";
+	exit 1;
+}
+
+#no commits nlogs = 0
+$log = "./.legit/log";
+$nlogs = "0";
+open(FILE, "< $log") or die "can't open $log: $!";
+$nlogs++ while <FILE>;
+close FILE;
+
+if ($nlogs == 0){ #no commits have been made ever
+	say STDERR "legit-branch: error: your repository does not have any commits yet";
+	exit 1;
+}
+
+if (scalar @ARGV < 0 || scalar @ARGV > 2){ #if did not supply a file or args more than 2
+	say STDERR "usage: legit-branch [-d] <branch>";
+	exit 1;
+}
+
+if (scalar @ARGV == 0){ #print all branches
+	foreach $branch (glob ".legit/branch/*"){
+		$branch = basename($branch);
+		push @branches, $branch;
+	}
+	@branches = sort @branches;
+	foreach $name (@branches){
+		print "$name\n";
+	}
+	exit 0;
+}
+
+if (scalar @ARGV == 1){ #ARGV[0] should be branch name CREATE
+	if ($ARGV[0] =~ /^-d$/){
+		say STDERR "legit-branch: error: branch name required";
+		exit 1;
+	}
+	check_branchname($ARGV[0]);
+	#check branchname doesnt already exist
+	if (-d "./.legit/branch/$ARGV[0]"){
+		say STDERR "legit-branch: error: branch '$ARGV[0]' already exists";
+		exit 1;
+	}
+	mkdir "./.legit/branch/$ARGV[0]";
+	#copy all files in master to branch - will sort in checkout 
+	foreach $copyfile (glob "*"){
+		next if (-d $copyfile);
+		copy ("$copyfile",".legit/branch/$ARGV[0]");
+	}
+	$curr_dir = get_current_branch();
+	chomp $curr_dir; #update last commit for new branch
+	if (-e ".legit/branch/$curr_dir/.lastcommit"){
+		copy (".legit/branch/$curr_dir/.lastcommit", ".legit/branch/$ARGV[0]/.lastcommit");
+	}
+	
+	exit 0;
+}
+
+if (scalar @ARGV == 2){ #-d ARGV[1] is branch names DELETE
+	if ($ARGV[0] !~ /^-d$/ and $ARGV[1] !~ /^-d$/){
+		say STDERR "usage: legit-branch [-d] <branch>";
+		exit 1;
+	}
+	
+	if ($ARGV[0] !~ /^-d$/){ #find where the flag is 
+		$name = $ARGV[0];
+	} else {
+		$name = $ARGV[1];
+	}
+	#check branch exists 
+	check_branchname($name);
+	if (! -d "./.legit/branch/$name"){
+		say STDERR "legit-branch: error: branch '$name' does not exist";
+		exit 1;
+	}
+	#check branch name isnt master
+	if ("$name" =~ /^master$/){
+		say STDERR "legit-branch: error: can not delete branch 'master'";
+		exit 1;
+	}
+	#check for unmerged changes
+	check_unmerge($name);
+	exit 0;
+}
+
+
+
+sub get_current_branch {
+	open F, '<', ".legit/working_dir" or die;
+	foreach my $line (<F>){
+		return "$line";
+	}
+	close F;
+}
+
+sub check_branchname {
+	my ($branchname) = @_;
+	#if file is just -, -number or purely of numbers
+	if ($branchname =~ /^-$/ || $branchname =~ /^-[0-9]+$/ || $branchname =~ /^[0-9]*$/ ){
+		say STDERR "legit-branch: error: invalid branch name '$branchname'";
+		exit 1;
+	}
+	#if file starts with - give usage error
+	if ($branchname =~ /^-/){
+		say STDERR "usage: legit-branch [-d] <branch>";
+		exit 1;
+	}
+	if ($branchname !~ /^[a-zA-Z0-9]([a-zA-Z0-9_]|-)*$/){
+		say STDERR "legit-branch: error: invalid branch name '$branchname'";
+		exit 1;
+	}
+}
+
+sub check_unmerge {
+	my ($branchname) = @_;
+	foreach $file (glob ".legit/branch/$branchname/*"){
+		$file = basename($file);
+		committed($file, $branchname) or die "legit-branch: error: branch '$branchname' has unmerged changes\n";
+	}
+	rmtree(".legit/branch/$branchname");
+	print "Deleted branch '$branchname'\n";
+}
+
+sub committed {
+	my ($file, $branchname) = @_; 
+	if (! -e ".legit/branch/master/.lastcommit"){
+		return 1; 
+	}
+	if (! -e ".legit/branch/$branchname/.lastcommit"){
+		return 1;
+	}
+	open BRANCH, "<", ".legit/branch/$branchname/.lastcommit" or die;
+	for ($line = <BRANCH>){
+		$branchlastcom = $line;
+		chomp $branchlastcom;
+		last;
+	}
+	close BRANCH;
+	open MASTER, "<", ".legit/branch/master/.lastcommit" or die;
+	for ($line = <MASTER>){
+		$masterlastcom = $line;
+		chomp $masterlastcom;
+		last;
+	}
+	close MASTER;
+	foreach my $files (glob "./.legit/.repo/$branchlastcom/*"){
+		$base_files = basename($files);
+		if (! -e "./.legit/.repo/$masterlastcom/$base_files"){
+			return 0; #unmerged error
+		}
+		if (compare("$files", "./legit/.repo/$masterlastcom/$base_files") == 1){
+			return 0; #unmerged error
+		}
+	}
+		return 1;
+
+}

@@ -1,0 +1,353 @@
+#!/usr/local/bin/perl -w
+use File::Path 'rmtree';
+use File::Compare;
+use File::Copy;
+use File::Basename;
+use Algorithm::Merge qw(merge diff3 traverse_sequences3);
+use List::MoreUtils qw(uniq);
+#export PATH="$PATH:.";
+
+#if .legit doesnt exist
+if (! -d ".legit"){
+	say STDERR "legit-merge: error: no .legit directory containing legit repository exists";
+	exit 1;
+}
+
+#no commits nlogs = 0
+$log = "./.legit/log";
+$nlogs = "0";
+open(FILE, "< $log") or die "can't open $log: $!";
+$nlogs++ while <FILE>;
+#$num_dir = $nlogs - 1;
+
+if ($nlogs == 0){ #no commits have been made ever
+	say STDERR "legit-merge: error: your repository does not have any commits yet";
+	exit 1;
+}
+
+#if args is not equal to 1
+if (scalar @ARGV > 3){ #did not supply file
+	say STDERR "usage: legit-merge <branch|commit> -m message";
+	exit 1;
+}
+
+#check if args contain a flag
+$containsflag = 0;
+foreach $arg (@ARGV){
+	if ($arg eq "-m"){
+		$containsflag = 1;
+	}
+}
+
+if ($containsflag == 0 && scalar @ARGV == 1){
+	say STDERR "legit-merge: error: empty commit message";
+	exit 1;
+} else {
+	if (scalar @ARGV != 3){
+		say STDERR "usage: legit-merge <branch|commit> -m message";
+		exit 1;
+	}
+}
+
+#set up branch information
+$tomerge = "$ARGV[0]";
+$message = "$ARGV[2]";
+my $lastbranchfolder = '';    # the last commit of branch tomerge
+my $firstbranchfolder = '';   # the first commit of tomerge, place where branch was separated (base)
+
+#if argument is a branch name
+if ($tomerge =~ /[a-zA-Z]/){
+	if (! -e ".legit/branch/$tomerge"){
+		say STDERR "legit-merge: error: unknown branch '$tomerge'";
+		exit 1;
+	} else {
+		my $lastbranch = get_lastcom_branch($tomerge);
+		my $firstbranch = get_firstcom_branch($tomerge);
+		$lastbranchfolder = ".legit/.repo/$lastbranch";
+		$firstbranchfolder = ".legit/.repo/$firstbranch";
+	}
+} else { #if argument is a commit number
+	if (! -d ".legit/.repo/$tomerge"){
+		say STDERR "legit-merge: error: unknown commit '$tomerge'";
+		exit 1;
+	} else {
+		$lastbranchfolder = ".legit/.repo/$tomerge";
+		#given a commit folder, figure which branch commit was made from 
+		#given the branch, find the first commit, when file was separated
+		foreach my $branch (glob ".legit/branch/*"){
+			my $branchname = basename($branch);
+			my $lastbranch = get_lastcom_branch($branchname);
+			if ($lastbranch == $tomerge){
+				my $firstbranch = get_firstcom_branch($branchname);
+				$firstbranchfolder = ".legit/.repo/$firstbranch";
+				$tomerge = $branchname;
+				last;
+			}
+		}
+	}
+}
+
+#get curr_dir's last commit 
+$currdir = get_current_branch();
+$lastcurr= get_lastcom_branch($currdir);
+$lastcurrfolder = ".legit/.repo/$lastcurr";
+
+# 1. try to merge into curr_dir, or no change (updated already)
+if ($lastcurrfolder eq $lastbranchfolder or $tomerge eq $currdir){
+	print "Already up to date\n";
+	exit 0;
+}
+
+#2. fastforward : after branch was created, curr has not been committed
+#no commit needed, update files in curr and index to same as branch 
+if ($lastcurrfolder eq $firstbranchfolder){
+	foreach my $lbfile (glob "$lastbranchfolder/*"){ #update files same as branch
+		my $baselbfile = basename($lbfile);
+			copy("$lbfile", "$baselbfile") or die;
+			copy("$lbfile", ".legit/.index/$baselbfile") or die;
+		}
+	foreach my $file (glob "*"){ #if not in branch delete
+		my $basefile = basename($file);
+		if (! -e "$lastbranchfolder/$basefile" && -e "$lastcurrfolder/$basefile"){
+			 unlink("$file"); 
+		}
+	}
+	foreach my $indexfile (glob ".legit/.index/*"){ #if not in branch delete from index
+		my $baseindexfile = basename($indexfile);
+		if (! -e "$lastbranchfolder/$baseindexfile" && -e "$lastcurrfolder/$baseindexfile"){
+			unlink("$indexfile");
+		}
+	}
+	updatelog($tomerge, $currdir); #commits for branch should also be commits for curr
+	print "Fast-forward: no commit created\n";
+	exit 0;
+}
+
+#3. merge conflicts 
+my @conflicts = ();
+foreach $lastbranchfile (glob "$lastbranchfolder/*"){
+	my $basefile = basename($lastbranchfile);
+	my $conflicts = checkconflicts($lastbranchfile, $lastcurrfolder, $firstbranchfolder);
+	if ($conflicts == 1){ #found conflict for basefile
+		push @conflicts, $basefile;
+	}
+}
+if (@conflicts > 0){
+	say STDERR "legit-merge: error: These files can not be merged:";
+	foreach my $file (sort @conflicts){
+		say STDERR "$file";
+	}
+	exit 1;
+}
+
+#grab number of logs
+$log = "./.legit/log";
+$nlogs = "0";
+open(FILE, "< $log") or die "can't open $log: $!";
+$nlogs++ while <FILE>;
+
+#4. merge : curr, last, first for each file in last
+foreach $lastbranchfile (glob "$lastbranchfolder/*"){
+	my $basefile = basename($lastbranchfile);
+	my @merged = ();
+	@merged = merging("$lastcurrfolder/$basefile", "$lastbranchfile","$firstbranchfolder/$basefile");
+	if ( -e "$firstbranchfolder/$basefile"){
+		print "Auto-merging $basefile\n";
+	}
+	open my $tomergefile, '>', "$basefile" or die;
+	foreach $line (@merged){ #copy merge version to basefile
+		print $tomergefile "$line";
+	}
+	close $tomergefile;
+	copy ("$basefile", ".legit/.index/");
+	#commit new index
+	mkdir ".legit/.repo/$nlogs";
+    open F, '<', ".legit/log" or die; #append to top
+	@log = <F>;
+	close F;
+	open F, '>', ".legit/log" or die;
+	print F "$nlogs $message\n";
+	print F @log;
+    close F;
+	#add this new log to .lastcommit
+	chomp $currdir;
+	open F, '<', ".legit/branch/$currdir/.lastcommit" or die; #append to top
+	@commits = <F>;
+	close F;
+	open F, '>', ".legit/branch/$currdir/.lastcommit" or die;
+	print F "$nlogs\n";
+	print F @commits;
+    close F;
+	updatelog($tomerge, $currdir);
+    foreach my $file (glob ".legit/.index/*") { #update files in repo and branch
+    copy("$file", ".legit/.repo/$nlogs/");
+    copy("$file", ".legit/branch/$currdir/");
+	}
+}
+print "Committed as commit $nlogs\n";
+exit 0;
+
+sub merging {
+	my @merged = ();
+	my ($lastcurrfile, $lastbranchfile, $firstbranchfile) = @_;
+	my $basefile = basename($lastbranchfile);
+	open LASTB, '<', "$lastbranchfile" or die; #preparing files to compare line by line
+	my @lb = <LASTB>;
+	close LASTB;
+
+	if (! -e "$lastcurrfolder/$basefile"){
+    	copy("$lastbranchfile","$basefile") or die;
+	}
+	open LASTC, '<', "$lastcurrfolder/$basefile" or die;
+	my @lc = <LASTC>;
+	close LASTC;
+
+	if (-e "$firstbranchfolder/$basefile"){
+		open FIRSTB, '<', "$firstbranchfile" or die "$basefile";
+		my @fb = <FIRSTB>;
+		close FIRSTB;
+		@merged = merge( \@fb, \@lc, \@lb, { #uses built in function, compares three different files
+			CONFLICT => sub {die "legit-merge: error: These files can not be merged:\n$basefile\n"}
+		});
+	} else {
+		@merged = @lc;
+	}
+	return @merged;
+}
+sub checkconflicts {
+	my ($lastbranchfile, $lastcurrfolder, $firstbranchfolder) = @_;
+	my $basefile = basename($lastbranchfile);
+	if (-e "$lastcurrfolder/$basefile" && -e "$firstbranchfolder/$basefile"){
+		open LASTB, '<', "$lastbranchfile"; #preparing files to compare line by line
+		my @lb = <LASTB>;
+		close LASTB;
+
+		open LASTC, '<', "$lastcurrfolder/$basefile";
+		my @lc = <LASTC>;
+		close LASTC;
+
+		open FIRSTB, '<', "$firstbranchfolder/$basefile";
+		my @fb = <FIRSTB>;
+		close FIRSTB;
+
+		my $line = 0;
+		while ($line < @lb && $line < @lc){
+		#1. first branch file is shorter than last branch file and curr :changes appended
+		#dealing with these extra lines are diff between last branch and curr
+			if ($line >= @fb){ #if line is an extra line
+				if ($lc[$line] ne $lb[$line]){ #line is diff between curr and last branch
+					return 1;
+            	}
+			}
+		#2. same number of lines, line diff between first branch, last branch and curr :changes made
+			elsif ($fb[$line] ne $lc[$line] && $fb[$line] ne $lb[$line] && $lc[$line] ne $lb[$line]){
+				return 1;
+     		}
+     		$line += 1;
+		}
+	}
+	#3. file doesnt exist in first branch, exists in last and curr: file added later
+	#lines diff between last branch and curr
+   elsif ((-e "$lastcurrfolder/$basefile") && (! -e "$firstbranchfolder/$basefile")){
+		return 1 if (compare("$lastbranchfile", "$lastcurrfolder/$basefile") == 1);
+	}
+	return 0;	
+}
+
+sub get_lastcom_branch {
+	my ($branchname) = @_;
+	chomp $branchname;
+	if (! -e ".legit/branch/$branchname/.lastcommit"){
+		return -1;
+	}
+	open BRANCH, "<", ".legit/branch/$branchname/.lastcommit" or die;
+	for ($line = <BRANCH>){ #first line in file
+		$branchlastcom = $line;
+		chomp $branchlastcom; 
+		last;
+	}
+	close BRANCH;
+	return $branchlastcom;
+}
+
+sub get_firstcom_branch {
+	my ($branchname) = @_;
+	if (! -e ".legit/branch/$branchname/.lastcommit"){
+		return -1;
+	}
+	open BRANCH, "<", ".legit/branch/$branchname/.lastcommit" or die;
+	while ($line = <BRANCH>){ #last line in file
+		$branchlastcom = $line;
+		chomp $line;
+		chomp $branchlastcom;
+	}
+	close BRANCH;
+	return $branchlastcom;
+}
+
+sub get_allcom_branch {
+	my ($branchname) = @_;
+	@coms = ();
+	chomp $branchname;
+	if (! -e ".legit/branch/$branchname/.lastcommit"){
+		return -1;
+	}
+	open BRANCH, "<", ".legit/branch/$branchname/.lastcommit" or die;
+	for ($line = <BRANCH>){
+		chomp $line;
+		push @coms, $line
+	}
+	close BRANCH;
+	return @coms;
+}
+
+sub get_current_branch {
+	open F, '<', ".legit/working_dir" or die;
+	foreach my $line (<F>){
+		return "$line";
+	}
+	close F;
+}
+
+sub updatelog {
+	(my $tomerge, my $currdir) = @_;
+	#make log for currdir the same as to merge 
+	my @branchcommits = get_allcom_branch($tomerge);
+	my @currcommits = get_allcom_branch($currdir);
+
+	foreach my $bcommit (@branchcommits){
+		my $commitfound = 0;
+		foreach my $ccommit (@currcommits){
+			if ($bcommit == $ccommit){ #commit is in both, do nothing
+				$commitfound = 1;
+				last;
+			}
+		}
+		if ($commitfound == 0){ #append diff commits to end, sort later
+			chomp $currdir;
+			open my $fh, '>>', ".legit/branch/$currdir/.lastcommit" or die;
+			print $fh "$bcommit\n";
+			close $fh;
+		}
+	}
+	#sort lines, highest on top, get rid of duplicates
+	@lines = ();
+	open F, '<', ".legit/branch/$currdir/.lastcommit" or die;
+	while (my $line = <F>){
+		chomp $line;
+		push @lines, $line;
+	}
+	close F;
+	@sorted_lines = reverse sort { $a <=> $b } @lines; #sort numerically
+	@sorted_lines = uniq(@sorted_lines); #get ride of duplicates
+	open F, '>', ".legit/branch/$currdir/.lastcommit" or die;
+	close F; #clear log
+	open my $fh, '>>', ".legit/branch/$currdir/.lastcommit";
+	for $lines (@sorted_lines){
+		print $fh "$lines\n"; #copy sorted version to log
+	}
+	close F
+}
+
+
+

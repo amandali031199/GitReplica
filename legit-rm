@@ -1,0 +1,201 @@
+#!/bin/dash
+#legit-rm: error: 'a' is not in the legit repository for both cache
+#usage: legit-rm [--force] [--cached] <filenames> x
+#if legit doesnt exist, legit-rm: error: no .legit directory containing legit repository exists x
+#legit-rm: error: invalid filename '$' x
+#- and -number: invalid filename x
+#other - : usage error x
+#legit-rm: error: '1.txt' in repository is different to working file 1
+#legit-rm: error: '1.txt' has changes staged in the index 2
+#legit-rm: error: '1.txt' in index is different to both working file and repository 3
+#legit-rm: error: '1.txt' is not in the legit repository x
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-rm: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+
+#no commits nlogs = 0
+nlogs=`cat ./.legit/log | wc -l`
+if test $nlogs -eq 0 #no commits have been made ever
+then
+	echo "legit-rm: error: your repository does not have any commits yet" >&2
+	exit 1
+fi
+
+if test "$#" -lt 1 #if did not supply a file
+then
+	echo "usage: legit-rm [--force] [--cached] <filenames>" >&2
+	exit 1
+fi 
+
+force=0
+cached=0
+for args in "$@"
+do
+	#if an arg is force then force  =1
+	if test $args = "--force"
+	then
+		force=1
+	fi
+	#if an arg is cache then cache = 1
+	if test $args = "--cached"
+	then
+		cached=1
+	fi
+done
+
+#loop through all args that are not flags
+nfiles=0
+for args in "$@"
+do
+	#if arg is not force or cached then assume is a filename, check valid try to delete
+	if test $args != "--force" && test $args != "--cached"
+	then
+		nfiles=1
+		file="$args"
+		#if file starts with - give usage error
+		checkstart=`echo "$file"| 
+					egrep -v '^-'` #empty if contains -
+		onlydash=`echo "$file" | 
+				  egrep -v '^-$'` #file is just -
+		flag=`echo "$file" | 
+			  egrep -v '^-[0-9]+$'` #file is -number
+		if test -z "$onlydash" || test -z "$flag" #if empty
+		then
+			echo "legit-rm: error: invalid filename '$file'" >&2
+			exit 1
+		fi
+		if test -z "$checkstart" #if empty
+		then
+			echo "usage: legit-rm [--force] [--cached] <filenames>" >&2
+			exit 1
+		fi
+
+		#if filename is invalid
+		files_valid=`echo "$file" | 
+					 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'` #empty if filename is invalid
+		if test -z "$files_valid" #if filename is invalid
+		then
+			echo "legit-rm: error: invalid filename '$file'" >&2
+			exit 1
+		fi
+
+		#check file is in index
+		if test ! -e "./.legit/.index/$file" #if file does not exist
+		then
+			echo "legit-rm: error: '$file' is not in the legit repository" >&2
+			exit 1
+		fi
+
+		#check file is in most recent repository
+		in_repo=0
+		in_curr=0
+		num_dir=`expr $nlogs - 1` #num of directories in repo, last commit
+		if test -e "./.legit/.repo/$num_dir/$file" #if file does exist
+		then
+			in_repo=1 #file is in repo = 1
+		fi
+
+		#check file is in current directory
+		if test -e "./$file" #if file does exist
+		then
+			in_curr=1 #file is in curr = 1
+		fi
+
+		#comparing files 
+		if test $in_repo -eq 1 #if its in repo compare
+		then
+			difference_ir=`diff -rq "./.legit/.index/$file" "./.legit/.repo/$num_dir/$file"` #empty if there is no difference
+		else 
+			difference_ir="" #file isn't in repo but you can still delete file from index
+		fi
+
+		if test $in_curr -eq 1 # if its in current dir
+		then
+			difference_ic=`diff -rq "./.legit/.index/$file" "./$file"` #empty if no difference
+		else
+			difference_ic="" #file is not in curr but can still delete from index
+		fi
+
+		if test $in_repo -eq 1 && test $in_curr -eq 1 # if its in current dir and repo
+		then
+			difference_rc=`diff -rq "./$file" "./.legit/.repo/$num_dir/$file"` #empty if no difference
+		else
+			difference_rc="" 
+		fi
+
+		#check difference between index, current directory and repo error messages
+		if test $force -eq 0 #if no force flag
+		then
+			if test $cached -eq 1 #if theres a cached flag
+			then #compare index and repository versions of file
+				if test ! -z "$difference_ir" && test ! -z "$difference_ic" #if index is diff to curr and repo then error
+				then
+					echo "legit-rm: error: '$file' in index is different to both working file and repository" >&2
+					exit 1
+				fi
+			else #if theres no flags 
+				#if exists in curr and index but not repo: error 
+				if test $in_repo -eq 0 && test $in_curr -eq 1
+				then
+					echo "legit-rm: error: '$file' has changes staged in the index" >&2
+					exit 1
+				fi
+				#if all different 
+				if test ! -z "$difference_ir" && test ! -z "$difference_ic" #if index is diff to curr and repo then error
+				then
+					echo "legit-rm: error: '$file' in index is different to both working file and repository" >&2
+					exit 1
+				fi
+				#if only curr is diff to repo 
+				if test ! -z "$difference_rc" && test -z "$difference_ir" #diff btwn curr and repo but index and repo same
+				then	
+					echo "legit-rm: error: '$file' in repository is different to working file" >&2
+					exit 1
+				fi
+				# if only index is diff to repository
+				if test ! -z "$difference_ir" && test -z "$difference_ic" #diff btwn index and repo but index and curr same
+				then
+					echo "legit-rm: error: '$file' has changes staged in the index" >&2
+					exit 1
+				fi
+			fi
+		fi
+	fi
+done
+
+#if no files were provided
+if test $nfiles -eq 0
+then
+	echo "usage: legit-rm [--force] [--cached] <filenames>" >&2
+	exit 1
+fi
+
+#separated the actual rm section: since rm should not take place at all if error messages appear
+for args in "$@"
+do
+	#if arg is not force or cached then assume is a filename, check valid try to delete
+	if test $args != "--force" && test $args != "--cached"
+	then
+		file="$args"
+		#if cached delete from only index
+		if test "$cached" -eq 1
+		then
+			rm "./.legit/.index/$file"
+		else #if not cached delete from curr and index
+			#check if file exists in curr, if exists delete, if not do nothing
+			if test "$in_curr" -eq 1
+			then
+				rm "./$file"
+			fi
+				rm "./.legit/.index/$file"
+		fi
+	fi
+done
+exit 0
+
+
+

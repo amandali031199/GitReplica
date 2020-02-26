@@ -1,0 +1,36 @@
+DATE 		| START	| STOP	| ACTIVITY			| COMMENTS 
+29/06/19	| 17:50	| 18:47 | preparing			| read specs and made reference sheet with list of available shell commands
+30/06/19	| 22:00	| 22:38	| coding			| finished legit-init
+30/06/19 	| 22:38	| 00:13	| coding 			| finished legit-add
+01/07/19	| 00:14 | 01:06	| planning			| researching, testing implementation, writing pseudocode for legit-commit
+01/07/19	| 17:00	| 18:42	| coding			| finished legit-commit
+01/07/19	| 19:15	| 19:40	| coding			| finished legit-log
+01/07/19	| 19:41	| 19:54	| planning			| researching, testing implementation, writing pseudocode for legit-show
+01/07/19	| 22:00	| 23:48	| debugging			| bugs in syntax, making it past autotests for add, commit, log 
+02/07/19 	| 23:49	| 01:54	| coding			| finished legit-show, passed all subset 0 tests
+02/07/19	| 12:00	| 12:40	| planning&coding	| researching, testing, implementation writing pseudocode for -a, started coding and organising structure 										  of legit-commit
+02/07/19	| 22:30	| 22:40 | debugging			| finished legit-commit -a
+04/07/19	| 00:12	| 02:07	| planning			| researching, testing implementation, writing pseudocode for legit-rm 
+05/07/19	| 23:00	| 04:39	| debugging&coding	| adding multiple files, finished legit-rm
+06/07/19 	| 04:39 | 07:13	| planning 			| researching, testing implementation, writing pseudocode for legit-status
+06/07/19 	| 23:00 | 01:52	| debugging&coding	| implementing and debugging legit-status: control flows
+07/07/19	| 01:53	| 02:40	| planning			| researching, testing implementation, writing pseudocode for legit-branch 
+08/07/19	| 16:10	| 19:32	| debugging&coding	| finished legit-branch, debugging add when file is deleted
+09/07/19	| 01:30	| 06:20	| debugging&coding	| finished general layout of legit-checkout, issues with overwritten, 
+												  changing structure of init for subset 2
+10/07/19	| 23:35	| 04:12	| debugging&coding	| finished test 0,1,2: debugging subset 0 based off tests
+11/07/19	| 12:10	| 17:55	| debugging&coding	| finished test 3,4,5: debugging subset 1 based off tests, issues with checkout working with 
+												  log and status,
+												  adding structure to log, commit, status to work with subset 2
+12/07/19 	| 09:00	| 14:31	| debugging&coding	| finished test 6,7: debugging subset 2 based off tests 
+13/07/19	| 14:00	| 16:40	| debugging&coding	| issues with status working with checkout (unsolved)
+14/07/19	| 10:00	| 19:27	| debugging&coding	| finished test 8,9: debugging subset 2 based of tests
+												  issues with branch:unmerge
+												  testing implementation, writing pseudocode, researching for legit-merge 
+												  issues with merge: working with status, control flow for conflicts, working with rm 
+
+ 
+
+
+
+

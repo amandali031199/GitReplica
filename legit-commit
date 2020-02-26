@@ -1,0 +1,154 @@
+#!/bin/dash
+# if theres no difference: nothing to commit, compare index to last dir in .repo, diff -rq 
+#Committed as commit 0, number comes from how many dir are there in .repo
+#usage: legit-commit [-a] -m commit-message: $# must be two (later 3), has to be flag then message, contains new line x
+#legit-commit: error: commit message can not contain a newline x
+#legit-commit: error: no .legit directory containing legit repository exists x
+#saves a copy of all files in the index to the repository.
+#cp index to a dir in .repo 
+#if index is empty: nothing to commit x
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-commit: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+
+#if no flags/files or too many were given 
+if test "$#" -ne 2 && test "$#" -ne 3 
+then
+	echo "usage: legit-commit [-a] -m commit-message" >&2
+	exit 1
+fi 
+
+if test "$#" -eq 3 # possible -a flag 
+then
+	#check first arg is -a 
+	check_a=`echo "$1" | 
+			 egrep "^-a$"` #will be empty if arg is not -a
+	if test -z "$check_a" #if it's not -a
+	then	
+		echo "usage: legit-commit [-a] -m commit-message" >&2
+		exit 1
+	fi
+	flaga=1 #true has flag -a
+	flagm="$2"
+	message="$3"
+fi
+
+if test "$#" -eq 2 # no -a flag
+then
+	flaga=0 #false does not have flag -a
+	flagm="$1"
+	message="$2"
+fi
+ 
+#check flagm is -m
+check_m=`echo "$flagm"| 
+		 egrep "^-m$"` #will be empty if first arg is not a flag
+if test -z "$check_m" #if flag is empty
+then
+	echo "usage: legit-commit [-a] -m commit-message" >&2
+	exit 1
+fi
+
+#check message isn't '-', or starts with - (except -numbers)
+check_start=`echo "$message" | 
+			 egrep -v "^-"` #will be empty if message starts with -
+check_number=`echo "$message" | 
+			  egrep "^-[0-9]+$"` #if empty, then flag is not -number
+if test -z "$check_start" #if starts with -
+then
+	if test "$message" != "-" && test -z "$check_number" #if it's '-' and not -number
+	then
+		echo "usage: legit-commit [-a] -m commit-message" >&2
+		exit 1
+	fi
+fi
+
+#check message doesn't contain new lines
+nline=`echo "$message" | 
+	   wc -l` #is 1 if no new lines, > 1 if has \n
+if test $nline -gt 1
+then
+	echo "legit-commit: error: commit message can not contain a newline" >&2
+	exit 1
+fi
+
+#if contains -a flag 
+#for files in current directory, if file is in index : add/update these files 
+if test "$flaga" -eq 1
+then
+	for files in *
+	do
+		if test -e "./.legit/.index/$files" #if file exists in index
+		then
+			cp "$files" "./.legit/.index/$files"
+		fi
+	done
+fi
+
+#check there are new files/lines to commit 
+#if there is a dir in repo: check with last: if there are n lines in log, compare with dir called n-1
+#if not: just commit 
+nlogs=`cat ./.legit/log |
+	   wc -l`
+index='./.legit/.index'
+if test $nlogs -eq 0 #no commits have been made ever
+then
+	if [ "$(ls -A $index)" ]
+	then #not empty index
+		cp -r "$index" "./.legit/.repo/0"
+		echo "Committed as commit 0" 
+		#save in log
+		echo "0 $message" >./.legit/log
+		if test ! -d ".legit/branch/master" #considering subset 2, if never branched before
+		then
+			mkdir ".legit/branch/master" #create a master
+			for files in *
+			do
+				if test ! -d "$files"
+				then
+					cp "$files" ".legit/branch/master/$files" #replicate in master
+				fi
+			done
+		fi 
+		branch=`cat ".legit/working_dir"`
+		echo "$nlogs" > ".legit/branch/$branch/.lastcommit" #for subset 2 to work, save commit number
+		exit 0
+	else #empty index
+		echo "nothing to commit"
+		exit 0
+	fi
+else #previous commits have been made : find newest commit and get diff, if diff: commit, if not: nothing to commit
+	num_dir=`expr $nlogs - 1` #num of directories in repo
+	difference=`diff -rq $index "./.legit/.repo/$num_dir"` #empty if there is no difference
+	if test -z "$difference" #if no difference
+	then #do nothing/no change
+		echo "nothing to commit"
+		exit 0
+	else #commit
+		cp -r "$index" "./.legit/.repo/$nlogs"
+		echo "Committed as commit $nlogs" 
+		#save in log
+		(echo "$nlogs $message"; cat ./.legit/log) >./.legit/log.tmp #should append to top
+		mv ./.legit/log.tmp ./.legit/log
+		#if have branched before, save nlogs in branch
+		if test ! -d ".legit/branch/master"
+		then
+			mkdir ".legit/branch/master"
+			for files in "*"
+			do
+				if test ! -d "$files"
+				then
+					cp "$files" ".legit/branch/master/$files" #initialise master if it doesnt exist
+				fi
+			done
+		fi 
+		branch=`cat ".legit/working_dir"`
+		(echo "$nlogs"; cat ".legit/branch/$branch/.lastcommit") > ".legit/branch/$branch/.lastcommit.tmp"
+		mv ".legit/branch/$branch/.lastcommit.tmp" ".legit/branch/$branch/.lastcommit" #append to top
+		exit 0
+	fi
+fi

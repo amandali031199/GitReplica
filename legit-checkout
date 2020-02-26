@@ -1,0 +1,193 @@
+#!/usr/local/bin/perl -w
+use File::Path 'rmtree';
+use File::Compare;
+use File::Copy;
+use File::Basename;
+#usage: legit-checkout <branch>
+
+
+#if .legit doesnt exist
+if (! -d ".legit"){
+	say STDERR "legit-checkout: error: no .legit directory containing legit repository exists";
+	exit 1;
+}
+
+#no commits nlogs = 0
+$log = "./.legit/log";
+$nlogs = "0";
+open(FILE, "< $log") or die "can't open $log: $!";
+$nlogs++ while <FILE>;
+close FILE;
+if ($nlogs == 0){ #no commits have been made ever
+	say STDERR "legit-checkout: error: your repository does not have any commits yet";
+	exit 1;
+}
+
+#if args is not equal to 1
+if (scalar @ARGV != 1){ #did not supply file
+	say STDERR "usage: legit-checkout <branch>";
+	exit 1;
+}
+
+#if branch doesnt exists: say unknown branch
+if (! -e ".legit/branch/$ARGV[0]"){
+	say STDERR "legit-checkout: error: unknown branch '$ARGV[0]'";
+	exit 1;
+}
+
+#if branchname is same as name in working_dir: say already on "branch" 
+$curr_dir = get_current_branch();
+chomp $curr_dir;
+if ($curr_dir eq "$ARGV[0]"){
+	say STDERR "Already on '$ARGV[0]'";
+	exit 1;
+}
+
+
+$lastbranchcom= get_lastcom_branch($ARGV[0]);
+$lastcurrcom = get_lastcom_branch($curr_dir);
+
+#foreach $file (glob ".legit/branch/$curr_dir/*"){ #this case messes up overwritten, should only apply if branch has committed but file content in branch is different to file content in committed
+#	$base_file = basename($file);
+#	if (committed($file) && compare("$file", ".legit/.repo/$lastcurrcom/$base_file") == 1){ 
+#		copy(".legit/.repo/$lastcurrcom/$base_file", "$base_file");
+#		print "f\n";
+#	}
+#}
+
+#check overwriting 
+#if file in working dir is different to commit  and exists in commit, or exists in branch already 
+@overwritten = ();
+foreach $files (glob "*"){
+	next if (-d "$files");
+	if ($lastbranchcom != "-1" && $lastcurrcom != "-1" && $lastbranchcom != $lastcurrcom){ #if there is a commit
+		if (! -e ".legit/.repo/$lastcurrcom/$files" or compare("$files", ".legit/.repo/$lastcurrcom/$files") == 1){
+			if (-e ".legit/.repo/$lastbranchcom/$files"){
+				if (compare("$files", ".legit/.repo/$lastbranchcom/$files") == 1){
+					push @overwritten, $files; #if all files are different
+				}
+			}
+		}
+	}
+}	
+	
+if (scalar @overwritten > 0){
+	say STDERR "legit-checkout: error: Your changes to the following files would be overwritten by checkout:";
+	foreach $overfile (@overwritten){
+		say STDERR "$overfile";
+	}
+	exit 1;
+}
+
+#save working directory to save branch (curr_dir)
+#if file in curr_dir doesnt exist in working, delete it 
+foreach $files (glob "*"){
+	next if (-d $files);
+	if (committed ("$files")){
+		copy ("$files", "./.legit/branch/$curr_dir/$files");
+	}
+}
+		
+foreach $del_files (glob ".legit/branch/$curr_dir/*"){
+	next if (-d $del_files);
+	$files = basename($del_files);
+	if (! -e "$files"){
+		unlink ("$del_files");
+	}
+}
+
+#update files in working directory according to the branch's last commit
+foreach my $currfile (glob ".legit/.repo/$lastcurrcom/*"){
+	my $basecurrfile = basename($currfile);
+	my $branchfile = ".legit/.repo/$lastbranchcom/$basecurrfile";
+
+	# if file in working dir is not in branch, delete it
+	if (! -e "$branchfile"){
+   		unlink("$basecurrfile");
+	}
+
+    # if file in working dir exists in current and branch and file is different to branch, update
+	elsif ( -e "$branchfile" && compare("$basecurrfile", "$currfile") == 0 && compare("$basecurrfile", "$branchfile") == 1){
+    	copy("$branchfile", "$basecurrfile") or die;
+	}
+}
+
+#load new branch to working directory 
+#if file doesn't exist in new, delete from working and index (if it's in working and index) 
+foreach my $file (glob "*"){
+	next if (-d $file);
+	$a = committed("$file");
+	if (! -e ".legit/branch/$ARGV[0]/$file" && committed("$file")){
+		if (-e ".legit/.index/$file"){
+			unlink (".legit/.index/$file");
+		}
+		unlink ("$file");
+	}
+
+	#if file in working has been committed but file in load hasn't, delete from working and index
+	if (committed("$file") && ! committed(".legit/branch/$ARGV[0]/$file")){
+		if (-e ".legit/.index/$file"){
+			unlink (".legit/.index/$file");
+		}
+		unlink ("$file");
+	}
+
+	#if file in working has been committed and file in load also committed, copy over 
+	if (committed ("$file") == 1 && committed (".legit/branch/$ARGV[0]/$file")== 1){
+		copy (".legit/branch/$ARGV[0]/$file", "$file");
+	}
+
+	#if file exists in new but not in working dir copy over
+	foreach $files (glob ".legit/branch/$ARGV[0]/*"){
+		next if (-d $files);
+		my $file = basename($files);
+		if (! -e "$file"){
+			copy (".legit/branch/$ARGV[0]/$file", "$file");
+		}
+	}
+}
+#update working dir name to be new branch, print switched 
+open (my $fh, '>', ".legit/working_dir") or die;
+print $fh "$ARGV[0]\n";
+close $fh;
+
+print "Switched to branch '$ARGV[0]'\n";
+
+
+
+sub get_current_branch {
+	open F, '<', ".legit/working_dir" or die;
+	foreach my $line (<F>){
+		return "$line";
+	}
+	close F;
+}
+
+sub committed {
+	my ($file_c) = @_;
+	foreach my $commit (glob ".legit/.repo/*") {
+		$base = basename ($file_c);
+  	 	$commit =~ s/\.legit\/\.repo\///;
+  	  	if (-e ".legit/.repo/$commit/$base" && compare("$file_c", ".legit/.repo/$commit/$base") == 0) {
+  	  	 	return 1;
+   		}
+    }
+    return 0;
+}
+
+
+sub get_lastcom_branch {
+	my ($branchname) = @_;
+	if (! -e ".legit/branch/$branchname/.lastcommit"){
+		return -1;
+	}
+	open BRANCH, "<", ".legit/branch/$branchname/.lastcommit" or die;
+	while ($line = <BRANCH>){
+		$branchlastcom = $line;
+		chomp $branchlastcom;
+		last;
+	}
+	close BRANCH;
+	return $branchlastcom;
+
+}

@@ -1,0 +1,181 @@
+#!/bin/dash
+#legit-status: error: no .legit directory containing legit repository exists
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-status: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+
+#no commits nlogs = 0
+nlogs=`cat ./.legit/log | wc -l`
+if test $nlogs -eq 0 #no commits have been made ever
+then
+	echo "legit-status: error: your repository does not have any commits yet" >&2
+	exit 1
+fi
+
+#for all files in current, in index (but not in curr), for all files in last commit but not in index and not in curr make a file storing this
+touch "./.legit/statusfiles"
+echo "">"./.legit/statusfiles" #clear file 
+
+for files in * #current directory
+do
+	files_valid=`echo "$files" | 
+				 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'`
+	if test  -f "$files" && test ! -z "$files_valid" #if file is  a reg file and valid name
+	then
+		echo "$files" >>"./.legit/statusfiles"
+	fi
+done
+
+for files in "./.legit/.index/"* #index
+do
+	filename=`echo $files | 
+			  cut -d'/' -f4`
+	files_valid=`echo "$filename" | 
+				 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'`
+	if test  -f "$files" && test ! -z "$files_valid" #if file is  a reg file and valid name
+	then
+		echo "$filename" >>"./.legit/statusfiles"
+	fi
+done
+
+num_dir=`expr $nlogs - 1`
+for files in "./.legit/.repo/$num_dir/"* #last commit repo
+do
+	filename=`echo $files | 
+			  cut -d'/' -f5`
+	files_valid=`echo "$filename" | 
+				 egrep '^[a-zA-Z0-9]([a-zA-Z0-9._]|-)*$'`
+	if test  -f "$files" && test ! -z "$files_valid" #if file is  a reg file and valid name
+	then
+		echo "$filename" >>"./.legit/statusfiles"
+	fi
+done
+
+#sort and remove duplicates from list of files
+allfiles=`cat "./.legit/statusfiles" | 
+		  sort | 
+		  uniq`
+
+#otherwise start statusing
+for files in $allfiles
+do
+	#check their status
+	#test if file in working dir has been committed 
+	i=0
+	committed=0
+	while test $i -lt $nlogs 
+	do
+		if test -e "./.legit/.repo/$i/$files" && test -e "./$files"
+		then
+			diff_com=`diff -rq "./$files" "./.legit/.repo/$i/$files"` #empty if no difference
+			if test -z "$diff_com"
+			then
+				committed=1
+			fi
+		fi
+		i=$((i+1))
+	done
+
+	#for files that have been committed: if has been branched, and working_dir is not master 
+	branch=`cat ".legit/working_dir" | 
+		    egrep "^master$" ` #not empty if branch is master
+	if test -z "$branch" && test "$committed" -eq 1 && test -d ".legit/branch/master"
+	then
+		filepath="./.legit/branch/master/$files" #look in master
+	else 
+		filepath="./$files" #look in working directory
+	fi
+
+	#1. exists in all
+	if test -e "$filepath" && test -e "./.legit/.index/$files" && test -e "./.legit/.repo/$num_dir/$files"
+	then
+		#defining comparisons
+		diff_ci=`diff -rq "$filepath" "./.legit/.index/$files"` #empty if there is no difference
+		diff_cr=`diff -rq "$filepath" "./.legit/.repo/$num_dir/$files"`
+		diff_ri=`diff -rq "./.legit/.repo/$num_dir/$files" "./.legit/.index/$files"`
+
+		#1.1 files are all different
+		if test ! -z "$diff_ci" && test ! -z "$diff_cr" && test ! -z "$diff_ri"
+		then
+			echo "$files - file changed, different changes staged for commit"
+			continue
+		fi
+		#1.2 files are all the same
+		if test -z "$diff_ci" && test -z "$diff_cr" && test -z "$diff_ri"
+		then
+			echo "$files - same as repo"
+			continue
+		fi
+		#1.3 index and repo same, curr different 
+		if test ! -z "$diff_ci" && test ! -z "$diff_cr" && test -z "$diff_ri"
+		then
+			echo "$files - file changed, changes not staged for commit"
+			continue
+		fi
+		#1.4 current and repo same, index different
+		if test ! -z "$diff_ci" && test -z "$diff_cr" && test ! -z "$diff_ri"
+		then
+			echo "$files - file changed, different changes staged for commit"
+			continue
+		fi
+		#1.5 current and index same, repo is different 
+		if test -z "$diff_ci" && test ! -z "$diff_cr" && test ! -z "$diff_ri"
+		then
+			echo "$files - file changed, changes staged for commit"
+			continue
+		fi
+	fi
+	
+	#2. exists only in repo  
+	if test ! -e "$filepath" && test ! -e "./.legit/.index/$files" && test -e "./.legit/.repo/$num_dir/$files"
+	then
+		echo "$files - deleted"
+		continue
+	fi
+	#3. exists only in repo and index 
+	if test ! -e "$filepath" && test -e "./.legit/.index/$files" && test -e "./.legit/.repo/$num_dir/$files"
+	then
+		diff_ri=`diff -rq "./.legit/.repo/$num_dir/$files" "./.legit/.index/$files"` #empty if no difference
+		#3.1 repo and index same 
+		if test -z "$diff_ri"
+		then
+			echo "$files - file deleted"
+			continue
+		#3.2 repo and index different 
+		else
+			echo "$files - file deleted, different changes staged for commit"
+			continue
+		fi
+	fi
+	#4. exists only in repo and curr 
+	if test -e "$filepath" && test ! -e "./.legit/.index/$files" && test -e "./.legit/.repo/$num_dir/$files"
+	then
+		echo "$files - untracked"
+		continue
+	fi
+	#5. exists only in index
+	if test ! -e "$filepath" && test -e "./.legit/.index/$files" && test ! -e "./.legit/.repo/$num_dir/$files"
+	then
+		echo "$files - added to index"
+		continue
+	fi
+	#6. exists only in index and curr 
+	if test -e "$filepath" && test -e "./.legit/.index/$files" && test ! -e "./.legit/.repo/$num_dir/$files"
+	then
+		echo "$files - added to index"
+		continue
+	fi
+	#7. exists only in curr 
+	if test -e "$filepath" && test ! -e "./.legit/.index/$files" && test ! -e "./.legit/.repo/$num_dir/$files"
+	then
+		echo "$files - untracked"
+		continue
+	fi
+done
+
+exit 0
+

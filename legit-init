@@ -1,0 +1,33 @@
+#!/bin/dash
+#create empty repo/directory called .legit Initialized empty legit repository in .legit
+#error message if already exists legit-init: error: .legit already exists
+#error message if arg >= 1 usage: legit-init
+
+if test "$#" -ne 0
+then
+	echo "usage: legit-init" >&2
+	exit 1
+fi
+
+if test -d ".legit"
+then
+	echo "legit-init: error: .legit already exists" >&2
+	exit 1
+else
+	mkdir ".legit"
+	mkdir ".legit/.repo"
+	mkdir ".legit/.index"
+	mkdir ".legit/branch"
+	touch ".legit/log"
+	touch ".legit/addlog"
+	touch ".legit/working_dir"
+	echo "master">".legit/working_dir"
+	if test -d ".legit"
+	then
+		echo "Initialized empty legit repository in .legit" 
+		exit 0
+	else
+		echo "legit-init: error: failed to create .legit" >&2 #unable to actually check what error message this shows
+		exit 1
+	fi
+fi

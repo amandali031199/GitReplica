@@ -1,0 +1,47 @@
+#!/bin/dash
+#usage: legit-log when more than 0 args
+#legit-log: error: no .legit directory containing legit repository exists
+# legit-log: error: your repository does not have any commits yet if nlogs = 0
+
+#if .legit doesnt exist
+if test ! -d ".legit"
+then
+	echo "legit-log: error: no .legit directory containing legit repository exists" >&2
+	exit 1
+fi
+
+#if no commits have been made yet
+nlogs=`cat ./.legit/log | wc -l`
+if test $nlogs -eq 0
+then
+	echo "legit-log: error: your repository does not have any commits yet" >&2
+	exit 1
+fi
+
+#if there are excess arguments
+if test "$#" -ne 0
+then
+	echo "usage: legit-log" >&2
+	exit 1
+fi
+
+#if branch before (taking care of subset cases)
+if test -d ".legit/branch/master"
+then
+	branch=`cat ".legit/working_dir"`
+	if test -e ".legit/branch/$branch/.lastcommit" #if branch has been committed before
+	then
+		while IFS= read -r line	#read line by line from .lastcommit file
+		do	
+			#print this line counting from the end in log file
+			line=$((nlogs-line))
+			head -n $line "./.legit/log" | 
+			tail -1 #getting specific line
+		done < ".legit/branch/$branch/.lastcommit"
+	else 
+		commit=$nlogs 	#just print the whole log
+		tail -n $commit "./.legit/log"
+	fi
+	exit 0
+fi
+
