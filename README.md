@@ -7,4 +7,7 @@ Harder commands such as Merge, Branch and Checkout are not completed and do expe
 1. Download the repository
 2. Type commands such as ./legit-add <filename>. Make sure to init first, usage errors are provided
   
-![](http://www.giphy.com/gifs/MeDwoDnO5MpAeyF7C6)
+## Demonstration
+![](git1.gif)
+![](git2.gif)
+![](git3.gif)
